@@ -1,0 +1,4 @@
+/hadoop
+/.env
+/.env.local
+*.log

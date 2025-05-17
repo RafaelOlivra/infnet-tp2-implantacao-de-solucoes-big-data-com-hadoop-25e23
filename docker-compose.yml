@@ -1,0 +1,126 @@
+version: '3'
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=probe-cluster
+    ports:
+      - "9870:9870"
+    volumes:
+      - ./hadoop/namenode:/hadoop/dfs/name
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CLUSTER_NAME=probe-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    volumes:
+      - ./hadoop/datanode:/hadoop/dfs/data
+    depends_on:
+      - namenode
+
+  hdfs-setup:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-setup
+    user: root
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_started
+    entrypoint: /bin/bash
+    command: >
+      -c "
+        echo 'Waiting for HDFS to be fully ready...'
+        until hdfs dfs -Dfs.defaultFS=hdfs://namenode:8020 -ls /; do
+          echo 'HDFS not fully ready yet, sleeping...'
+          sleep 5
+        done
+
+        HDFS_HIVE_PATHS='/input;/output;/data;/user/jovyan'
+        HDFS_JOVYAN_PATHS='/user/hive/warehouse;/tmp;/tmp/hive'
+
+        echo $${HDFS_HIVE_PATHS}
+        echo $${HDFS_JOVYAN_PATHS}
+
+        echo 'Creating and permissioning Hive directories...'
+        IFS=';' read -ra hive_paths <<< \"$${HDFS_HIVE_PATHS}\"
+        for path in \"$${hive_paths[@]}\"; do
+          hdfs dfs -Dfs.defaultFS=hdfs://namenode:8020 -mkdir -p \"$$path\"
+          hdfs dfs -Dfs.defaultFS=hdfs://namenode:8020 -chmod -R 1777 \"$$path\"
+        done
+
+        echo 'Creating and permissioning jovyan folders...'
+        IFS=';' read -ra jovyan_paths <<< \"$${HDFS_JOVYAN_PATHS}\"
+        for path in \"$${jovyan_paths[@]}\"; do
+          hdfs dfs -Dfs.defaultFS=hdfs://namenode:8020 -mkdir -p \"$$path\"
+          hdfs dfs -Dfs.defaultFS=hdfs://namenode:8020 -chown jovyan:supergroup \"$$path\"
+        done
+
+        echo 'HDFS permission setup complete.'
+      "
+
+  hive-server:
+    image: apache/hive:4.0.1
+    container_name: hive-server
+    environment:
+      - SERVICE_NAME=hiveserver2
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    depends_on:
+      namenode:
+        condition: service_healthy
+      hdfs-setup:
+        condition: service_completed_successfully
+    ports:
+      - "9083:9083"
+      - "10000:10000"
+      - "10002:10002"
+
+  pig:
+    image: suhothayan/hadoop-spark-pig-hive:2.9.2
+    container_name: pig
+    hostname: pig
+    command: /etc/bootstrap.sh -bash
+    tty: true
+    stdin_open: true
+    depends_on:
+      - namenode
+    ports:
+      - "8088:8088"
+      - "5070:50070" # Porta 50070 não é possível no WSL
+      - "10001:10001" # Para evitar conflito com HiveServer2 da hive-server
+    environment:
+      - HBASE_CONF_DIR=/etc/hbase/conf
+      - PIG_CLASSPATH=$HBASE_CONF_DIR
+    volumes:
+      - ./work/data:/input
+      - ./config/piggybank.jar:/usr/lib/pig/config/piggybank.jar
+      - ./config/hbase-site.xml:/etc/hbase/conf/config/hbase-site.xml
+
+  hbase:
+    image: harisekhon/hbase
+    container_name: hbase
+    ports:
+      - "16010:16010"
+      - "2181:2181"
+    environment:
+      - HBASE_MANAGES_ZK=true
+
+  pyspark:
+    image: jupyter/pyspark-notebook:latest
+    container_name: pyspark
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./work:/home/jovyan/work
+      - ./config/hive-site.xml:/usr/local/spark/conf/config/hive-site.xml
+    depends_on:
+      - namenode
+      - hive-server
+    environment:
+      - GRANT_SUDO=yes
+      - SPARK_CONF_DIR=/usr/local/spark/conf
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.allow_origin='*'

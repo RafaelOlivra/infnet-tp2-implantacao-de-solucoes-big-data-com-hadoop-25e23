@@ -1,0 +1,30 @@
+[
+    {
+        "tipo": "faculdade",
+        "nome": "Infnet"
+    },
+    {
+        "tipo": "faculdade",
+        "nome": "Estácio"
+    },
+    {
+        "tipo": "faculdade",
+        "nome": "Unifor"
+    },
+    {
+        "tipo": "faculdade",
+        "nome": "Unip"
+    },
+    {
+        "tipo": "faculdade",
+        "nome": "UFMG"
+    },
+    {
+        "tipo": "faculdade",
+        "nome": "PUC"
+    },
+    {
+        "tipo": "faculdade",
+        "nome": "UFBA"
+    }
+]
